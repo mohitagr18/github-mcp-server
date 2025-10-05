@@ -1,19 +1,20 @@
 """
-GitHub MCP Server for Cloud Run with streamable HTTP transport.
+GitHub MCP Server for Cloud Run - ADK Compatible
 """
 import asyncio
 import logging
 import os
 import base64
+import json
 from typing import Any
 import httpx
 from mcp.server.models import InitializationOptions
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
-import mcp.server.stdio
 from starlette.applications import Starlette
 from starlette.routing import Route
-from starlette.responses import Response
+from starlette.responses import Response, JSONResponse
+from starlette.requests import Request as StarletteRequest
 from mcp.server.sse import SseServerTransport
 
 logging.basicConfig(level=logging.INFO)
@@ -139,28 +140,74 @@ async def handle_call_tool(
     else:
         raise ValueError(f"Unknown tool: {name}")
 
-# Create SSE transport handler
-async def handle_sse(request):
-    """Handle SSE connections for MCP."""
-    async with SseServerTransport("/messages") as transport:
-        await server.run(
-            transport,
-            InitializationOptions(
-                server_name="github-mcp-server",
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
-    return Response()
+# MCP Message handler for POST requests
+async def handle_messages(request: StarletteRequest):
+    """Handle MCP messages via POST."""
+    try:
+        body = await request.json()
+        logger.info(f"Received MCP request: {body.get('method', 'unknown')}")
+        
+        # Process the request through MCP server
+        # This is a simplified handler - you may need to implement full MCP protocol
+        method = body.get("method")
+        
+        if method == "tools/list":
+            tools = await handle_list_tools()
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "result": {
+                    "tools": [
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "inputSchema": tool.inputSchema
+                        }
+                        for tool in tools
+                    ]
+                }
+            })
+        
+        elif method == "tools/call":
+            params = body.get("params", {})
+            result = await handle_call_tool(
+                params.get("name"),
+                params.get("arguments")
+            )
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "result": {
+                    "content": [
+                        {"type": item.type, "text": item.text}
+                        for item in result
+                    ]
+                }
+            })
+        
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": body.get("id"),
+            "error": {"code": -32601, "message": f"Method not found: {method}"}
+        })
+        
+    except Exception as e:
+        logger.error(f"Error handling request: {e}")
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "error": {"code": -32603, "message": str(e)}
+        }, status_code=500)
+
+# Health check
+async def health_check(request):
+    """Health check endpoint."""
+    return Response("OK", status_code=200)
 
 # Create Starlette app
 app = Starlette(
     routes=[
-        Route("/sse", endpoint=handle_sse),
-        Route("/health", endpoint=lambda request: Response("OK", status_code=200))
+        Route("/sse", endpoint=handle_messages, methods=["POST"]),  # Accept POST for ADK
+        Route("/health", endpoint=health_check, methods=["GET"])
     ]
 )
 
