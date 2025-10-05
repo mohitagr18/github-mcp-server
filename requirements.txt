@@ -13,6 +13,5 @@ uvicorn>=0.30.0
 #   --set-env-vars="GITHUB_TOKEN=YOUR_GITHUB_TOKEN" \
 #   --project=website-content-474103
 
-
 # Service URL: https://github-mcp-server-218722702133.us-east4.run.app
 # MCP Endpoint: https://github-mcp-server-218722702133.us-east4.run.app/sse
